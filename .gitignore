@@ -6,3 +6,5 @@ __pycache__/
 build/
 dist/
 steam-games.txt
+steam-games.tsv
+steam-games.json
