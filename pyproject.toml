@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "steam-game-list-exporter"
+version = "1.0.0"
+description = "Export your complete local Steam game library, including Steam Families games."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "WTFPL"
+keywords = ["steam", "steam-families", "game-library", "export"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Games/Entertainment",
+]
+
+[project.urls]
+Homepage = "https://github.com/aesxsc/steam-game-list-exporter"
+Issues = "https://github.com/aesxsc/steam-game-list-exporter/issues"
+
+[project.scripts]
+steam-game-list = "steam_game_list_exporter.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
