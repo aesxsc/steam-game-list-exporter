@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
+import sys
 
 
 @dataclass(slots=True)
@@ -150,34 +151,105 @@ def _local_app_stats(user_directory: Path) -> dict[int, GameStats]:
     return result
 
 
+def _read_cache_sections(path: Path) -> list[list[object]]:
+    """Read Steam cache sections, including concatenated JSON values.
+
+    Steam can store an array of section pairs followed immediately by more
+    section pairs (each its own valid JSON value). ``json.loads`` rejects the
+    extra values, so decode each in turn and normalize them into one list.
+    """
+    content = path.read_text(encoding="utf-8")
+    decoder = json.JSONDecoder()
+    sections: list[list[object]] = []
+    position = 0
+
+    while position < len(content):
+        while position < len(content) and content[position].isspace():
+            position += 1
+        if position == len(content):
+            break
+
+        try:
+            value, position = decoder.raw_decode(content, position)
+        except json.JSONDecodeError:
+            # A valid prefix may contain complete achievement data even when
+            # Steam appends an incomplete or malformed JSON value afterward.
+            if not sections:
+                raise
+            break
+        if not isinstance(value, list):
+            continue
+
+        # A single section pair: ["achievements", {"version": ..., "data": ...}]
+        if len(value) == 2 and isinstance(value[0], str):
+            sections.append(value)
+        else:
+            # A collection of section pairs: [["achievements", {...}], ...]
+            sections.extend(
+                section
+                for section in value
+                if isinstance(section, list)
+                and len(section) == 2
+                and isinstance(section[0], str)
+            )
+
+    return sections
+
+
 def _add_achievements(user_directory: Path, result: dict[int, GameStats]) -> None:
     cache = user_directory / "config/librarycache"
     if not cache.is_dir():
         return
+
     for path in cache.glob("*.json"):
         if not path.stem.isdigit():
             continue
+
         try:
-            records = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            records = _read_cache_sections(path)
+        except (OSError, UnicodeError, json.JSONDecodeError):
             continue
-        if not isinstance(records, list):
-            continue
+
+        # Collect all valid achievement counts, regardless of section order.
+        by_total: dict[int, int] = {}
+
         for record in records:
-            if not isinstance(record, list) or len(record) != 2 or record[0] != "achievements":
+            if record[0] != "achievements":
                 continue
+
             wrapper = record[1]
             data = wrapper.get("data", {}) if isinstance(wrapper, dict) else {}
             if not isinstance(data, dict):
-                break
+                continue
+
             total = _integer(data.get("nTotal"))
             unlocked = _integer(data.get("nAchieved"))
-            if total is not None and total > 0 and unlocked is not None:
-                stats = result.setdefault(int(path.stem), GameStats())
-                stats.achievements_total = total
-                stats.achievements_unlocked = unlocked
-                stats.achievement_percent = round(unlocked * 100 / total, 1)
-            break
+
+            if (
+                total is None
+                or unlocked is None
+                or total <= 0
+                or not 0 <= unlocked <= total
+            ):
+                continue
+
+            by_total[total] = max(by_total.get(total, -1), unlocked)
+
+        # Different totals may indicate changed achievement schemas.
+        # Don't guess which one is current.
+        if len(by_total) > 1:
+            print(
+                f"Warning: conflicting achievement totals in {path}: {sorted(by_total)}",
+                file=sys.stderr,
+            )
+            continue
+
+        if by_total:
+            total, unlocked = next(iter(by_total.items()))
+            stats = result.setdefault(int(path.stem), GameStats())
+            stats.achievements_total = total
+            stats.achievements_unlocked = unlocked
+            stats.achievement_percent = round(unlocked * 100 / total, 1)
 
 
 def installed_app_ids(steam_directory: Path) -> set[int]:
