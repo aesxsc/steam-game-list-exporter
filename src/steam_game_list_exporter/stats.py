@@ -130,23 +130,33 @@ def _local_app_stats(user_directory: Path) -> dict[int, GameStats]:
     if not path.is_file():
         return {}
     parsed = _read_vdf(path)
-    root = parsed.get("UserLocalConfigStore", parsed)
-    try:
-        apps = root["Software"]["Valve"]["Steam"]["apps"]
-    except (KeyError, TypeError):
-        return {}
-    if not isinstance(apps, dict):
-        return {}
+    def app_sections(value: object):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key.casefold() == "apps" and isinstance(child, dict):
+                    yield child
+                else:
+                    yield from app_sections(child)
+
+    apps = {}
+    for section in app_sections(parsed):
+        for appid, fields in section.items():
+            if isinstance(fields, dict):
+                normalized = {key.casefold(): value for key, value in fields.items()}
+                if any(key in normalized for key in (
+                    "playtime", "playtime2wks", "firstplayed", "lastplayed"
+                )):
+                    apps.setdefault(appid, {}).update(normalized)
 
     result: dict[int, GameStats] = {}
     for appid_text, values in apps.items():
         if not appid_text.isdigit() or not isinstance(values, dict):
             continue
         stats = GameStats()
-        stats.playtime_minutes = _integer(values.get("Playtime"))
-        stats.recent_playtime_minutes = _integer(values.get("Playtime2wks"))
-        stats.first_played = _integer(values.get("FirstPlayed"))
-        stats.last_played = _integer(values.get("LastPlayed"))
+        stats.playtime_minutes = _integer(values.get("playtime"))
+        stats.recent_playtime_minutes = _integer(values.get("playtime2wks"))
+        stats.first_played = _integer(values.get("firstplayed"))
+        stats.last_played = _integer(values.get("lastplayed"))
         result[int(appid_text)] = stats
     return result
 

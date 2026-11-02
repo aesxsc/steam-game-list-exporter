@@ -50,6 +50,20 @@ def test_reads_user_metrics(tmp_path: Path) -> None:
     assert stats[10].installed is True
 
 
+def test_variant_layout_and_case(tmp_path: Path) -> None:
+    user = _steam_fixture(tmp_path)
+    (user / "config/localconfig.vdf").write_text(
+        '\"AlternateRoot\" { \"steam\" { \"APPS\" {'
+        ' \"10\" { \"playtime\" \"24722\" \"LASTPLAYED\" \"1793071066\" }'
+        '} } \"unrelated\" { \"20\" { \"Playtime\" \"999\" } } }',
+        encoding="utf-8",
+    )
+    stats, _ = read_user_stats(tmp_path, {10})
+    assert stats[10].playtime_minutes == 24722
+    assert stats[10].last_played == 1793071066
+    assert 20 not in stats
+
+
 def test_resolves_explicit_user_and_installed_apps(tmp_path: Path) -> None:
     user = _steam_fixture(tmp_path)
     assert find_user_directory(tmp_path, "tester") == user
