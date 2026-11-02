@@ -55,3 +55,81 @@ def test_resolves_explicit_user_and_installed_apps(tmp_path: Path) -> None:
     assert find_user_directory(tmp_path, "tester") == user
     assert find_user_directory(tmp_path, "76561199064595157") == user
     assert installed_app_ids(tmp_path) == {10}
+
+
+def test_reads_concatenated_json_cache(tmp_path: Path) -> None:
+    user = _steam_fixture(tmp_path)
+    cache = user / "config/librarycache/10.json"
+
+    cache.write_text(
+        '[["achievements", {"version": 2, '
+        '"data": {"nTotal": 20, "nAchieved": 5}}]]'
+        '["descriptions", {"version": 1, "data": {}}]',
+        encoding="utf-8",
+    )
+
+    stats, _ = read_user_stats(tmp_path, {10})
+
+    assert stats[10].achievements_unlocked == 5
+    assert stats[10].achievements_total == 20
+    assert stats[10].achievement_percent == 25.0
+
+
+def test_achievement_order_independence(tmp_path: Path) -> None:
+    user = _steam_fixture(tmp_path)
+    cache = user / "config/librarycache/10.json"
+
+    low = '["achievements", {"data": {"nTotal": 13, "nAchieved": 11}}]'
+    high = '["achievements", {"data": {"nTotal": 13, "nAchieved": 13}}]'
+    other = '["descriptions", {"data": {}}]'
+
+    cases = (
+        low + other + high,
+        high + other + low,
+        other + low + high,
+        other + high + low,
+        "[" + ",".join((other, low, high)) + "]",
+    )
+
+    for content in cases:
+        cache.write_text(content, encoding="utf-8")
+
+        stats, _ = read_user_stats(tmp_path, {10})
+
+        assert stats[10].achievements_unlocked == 13
+        assert stats[10].achievements_total == 13
+        assert stats[10].achievement_percent == 100.0
+
+
+def test_preserves_achievements_before_incomplete_json(tmp_path: Path) -> None:
+    user = _steam_fixture(tmp_path)
+    cache = user / "config/librarycache/10.json"
+
+    cache.write_text(
+        '["descriptions", {"data": {}}]'
+        '["achievements", {"data": {"nTotal": 13, "nAchieved": 13}}]'
+        '["associations", {"data": ',
+        encoding="utf-8",
+    )
+
+    stats, _ = read_user_stats(tmp_path, {10})
+
+    assert stats[10].achievements_unlocked == 13
+    assert stats[10].achievements_total == 13
+
+
+def test_conflicting_achievement_totals(tmp_path: Path) -> None:
+    user = _steam_fixture(tmp_path)
+    cache = user / "config/librarycache/10.json"
+
+    first = '["achievements", {"data": {"nTotal": 13, "nAchieved": 13}}]'
+    second = '["achievements", {"data": {"nTotal": 14, "nAchieved": 13}}]'
+
+    for content in (first + second, second + first):
+        cache.write_text(content, encoding="utf-8")
+
+        stats, _ = read_user_stats(tmp_path, {10})
+
+        assert stats[10].achievements_total is None
+        assert stats[10].achievements_unlocked is None
+        assert stats[10].achievement_percent is None
